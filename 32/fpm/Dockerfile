@@ -10,7 +10,6 @@ RUN set -ex; \
         bzip2 \
         libldap-common \
         libmagickcore-7.q16-10-extra \
-        rsync \
     ; \
     apt-get dist-clean; \
     \
@@ -132,7 +131,6 @@ RUN { \
     chown -R www-data:root /var/www; \
     chmod -R g=u /var/www
 
-VOLUME /var/www/html
 
 
 ENV NEXTCLOUD_VERSION 32.0.15
@@ -162,8 +160,23 @@ RUN set -ex; \
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false $fetchDeps; \
     apt-get dist-clean
 
-COPY *.sh upgrade.exclude /
+COPY *.sh /
 COPY config/* /usr/src/nextcloud/config/
+
+# The code is baked into the image, so there is no rsync at startup. Only the
+# default config files are kept in /usr/src/nextcloud, as the reference the
+# entrypoint compares the persistent config volume against.
+RUN set -ex; \
+    cp -a /usr/src/nextcloud/. /var/www/html/; \
+    find /usr/src/nextcloud -mindepth 1 -maxdepth 1 ! -name config -exec rm -rf '{}' +; \
+    mkdir -p /var/www/html/themes; \
+    chown -R www-data:root /var/www/html; \
+    chmod -R g=u /var/www/html
+
+VOLUME /var/www/html/config
+VOLUME /var/www/html/data
+VOLUME /var/www/html/custom_apps
+VOLUME /var/www/html/themes
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["php-fpm"]
