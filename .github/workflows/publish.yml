@@ -1,0 +1,92 @@
+name: Publish Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      enterprise_url:
+        description: "Enterprise archive URL (.zip). Leave empty to publish every community image."
+        required: false
+        default: ""
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  resolve:
+    name: Resolve builds
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.resolve.outputs.include }}
+      suffix: ${{ steps.resolve.outputs.suffix }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build matrix from versions.json
+        id: resolve
+        run: |
+          if [ -z "$ENTERPRISE_URL" ]; then
+            suffix=""
+            include="$(jq -c '[to_entries[] | .key as $b | .value as $v | $v.variants | keys[] | {branch: $b, variant: ., version: $v.version}]' versions.json)"
+          else
+            suffix="-enterprise"
+            version="$(basename "$ENTERPRISE_URL" | sed -n 's/^nextcloud-\([0-9][0-9.]*\)-enterprise\.zip$/\1/p')"
+            if [ -z "$version" ]; then
+              echo "Cannot read a version from $ENTERPRISE_URL" >&2
+              exit 1
+            fi
+            branch="${version%%.*}"
+            repoVersion="$(jq -r --arg b "$branch" '.[$b].version // ""' versions.json)"
+            if [ -z "$repoVersion" ]; then
+              echo "Branch $branch is not in versions.json" >&2
+              exit 1
+            fi
+            if [ "$repoVersion" != "$version" ]; then
+              echo "versions.json has branch $branch at $repoVersion, not $version" >&2
+              exit 1
+            fi
+            include="$(jq -c --arg b "$branch" --arg v "$version" '[.[$b].variants | keys[] | {branch: $b, variant: ., version: $v}]' versions.json)"
+          fi
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+          jq . <<<"$include"
+        env:
+          ENTERPRISE_URL: ${{ inputs.enterprise_url }}
+
+  build:
+    name: ${{ matrix.version }}-${{ matrix.variant }}${{ needs.resolve.outputs.suffix }}
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.resolve.outputs.include) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lower case image name
+        id: image
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.branch }}/${{ matrix.variant }}
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ matrix.version }}-${{ matrix.variant }}${{ needs.resolve.outputs.suffix }}
+            ${{ steps.image.outputs.name }}:${{ matrix.branch }}-${{ matrix.variant }}${{ needs.resolve.outputs.suffix }}
+          build-args: |
+            ENTERPRISE_ARCHIVE_URL=${{ inputs.enterprise_url }}
+          cache-from: type=gha,scope=${{ matrix.branch }}-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.branch }}-${{ matrix.variant }}
