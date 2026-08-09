@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       include: ${{ steps.resolve.outputs.include }}
+      versions: ${{ steps.resolve.outputs.versions }}
       suffix: ${{ steps.resolve.outputs.suffix }}
     steps:
       - uses: actions/checkout@v6
@@ -29,6 +30,7 @@ jobs:
           if [ -z "$ENTERPRISE_URL" ]; then
             suffix=""
             include="$(jq -c '[to_entries[] | .key as $b | .value as $v | $v.variants | keys[] | {branch: $b, variant: ., version: $v.version}]' versions.json)"
+            versions="$(jq -c '[to_entries[] | {branch: .key, version: .value.version}]' versions.json)"
           else
             suffix="-enterprise"
             version="$(basename "$ENTERPRISE_URL" | sed -n 's/^nextcloud-\([0-9][0-9.]*\)-enterprise\.zip$/\1/p')"
@@ -47,9 +49,11 @@ jobs:
               exit 1
             fi
             include="$(jq -c --arg b "$branch" --arg v "$version" '[.[$b].variants | keys[] | {branch: $b, variant: ., version: $v}]' versions.json)"
+            versions="$(jq -nc --arg b "$branch" --arg v "$version" '[{branch: $b, version: $v}]')"
           fi
           echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
           echo "include=$include" >> "$GITHUB_OUTPUT"
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
           jq . <<<"$include"
         env:
           ENTERPRISE_URL: ${{ inputs.enterprise_url }}
@@ -87,3 +91,35 @@ jobs:
             ENTERPRISE_ARCHIVE_URL=${{ inputs.enterprise_url }}
           cache-from: type=gha,scope=${{ matrix.branch }}-${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.branch }}-${{ matrix.variant }}
+
+  nginx:
+    name: ${{ matrix.version }}-nginx${{ needs.resolve.outputs.suffix }}
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.resolve.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: nginx
+          push: true
+          build-args: |
+            NEXTCLOUD_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.version }}-fpm${{ needs.resolve.outputs.suffix }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.version }}-nginx${{ needs.resolve.outputs.suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.branch }}-nginx${{ needs.resolve.outputs.suffix }}
