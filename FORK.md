@@ -11,11 +11,12 @@ official image. Designed for Kubernetes deployments on NFS storage.
 - **No `VOLUME /var/www/html`**: the application code lives in the image layer. Only
   user-data directories (`config`, `data`, `custom_apps`, `themes`) are declared as
   volumes.
-- **No rsync at startup**: code is copied at build time, not at runtime.
+- **No rsync at startup**: code is copied at build time, not at runtime, in the same
+  layer as the extraction. Splitting the two would ship the code twice.
 - **Supports both Community and Enterprise**: select the edition via build args. Both
-  are verified against the same Nextcloud GPG key.
+  archives go through the same GPG verification before extraction.
 - **`NEXTCLOUD_INIT_HTACCESS` honours its value**: upstream only checks whether the
-  variable is defined, so setting it to `false` still enabled it.
+  variable is defined, so setting it to `false` still enables it.
 
 ## Build arguments
 
@@ -60,6 +61,8 @@ each successful install or upgrade) and compares it to the version baked in the 
 - **Tags**: each build is pushed twice, as `34.0.2-apache` which pins that exact
   patch, and as `34-apache` which follows the latest patch of the branch. Enterprise
   builds append `-enterprise` to both.
+- **nginx**: every run also builds the sidecar image from the `fpm` one it just
+  pushed, tagged `34.0.2-nginx` and `34-nginx`.
 
 Upstream's own workflows were removed: `update-sh.yml` pushes to `master` and would
 make it diverge, `images.yml` has the upstream repository hardcoded.
@@ -74,8 +77,20 @@ needs to see the application tree.
 - Upstream deployments mount the same volume into both containers. That does not work
   here, because the code lives in the image layer and the nginx sidecar runs a
   different image.
-- Either populate a shared `emptyDir` from an init container built on this image, or
-  build an nginx image carrying the same assets.
+- `nginx/Dockerfile` therefore builds an nginx image with the same code copied in, to
+  be used as the sidecar image instead of the stock `nginx:alpine`.
+
+Nothing else is needed on the chart side: point `nginx.image` at the `-nginx` tag of
+the matching version, and the existing `useImageCode` flag already stops the PVC from
+being mounted over the code. The `custom_apps` and `themes` mounts stay, since nginx
+serves static assets from them.
+
+`useImageCode` is not in the upstream chart. It lives on the `imagecode` branch of
+[ConsortiumGARR/nextcloud-community-helm](https://github.com/ConsortiumGARR/nextcloud-community-helm),
+proposed upstream as [nextcloud/helm#847](https://github.com/nextcloud/helm/pull/847).
+
+Both images must be kept at the same version, or nginx serves the static assets of one
+release while fpm runs another. The publish workflow always builds them together.
 
 ## Keeping up with upstream
 
@@ -95,6 +110,7 @@ needs to see the application tree.
 - `update.sh`: generates `32/`, `33/` and `34/` from the templates and `versions.json`
 - `.config/`: default PHP config files, baked into the image and also kept in
   `/usr/src/nextcloud/config/` as a reference for drift detection warnings at startup
+- `nginx/Dockerfile`: sidecar image, the app image's code copied onto `nginx:alpine`
 
 Everything under `32/`, `33/` and `34/` is generated. Do not edit it by hand.
 
