@@ -11,6 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_NAME: consortiumgarr/nextcloud
 
 jobs:
   resolve:
@@ -75,17 +76,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lower case image name
-        id: image
-        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.branch }}/${{ matrix.variant }}
           push: true
           tags: |
-            ${{ steps.image.outputs.name }}:${{ matrix.version }}-${{ matrix.variant }}${{ needs.resolve.outputs.suffix }}
-            ${{ steps.image.outputs.name }}:${{ matrix.branch }}-${{ matrix.variant }}${{ needs.resolve.outputs.suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.version }}-${{ matrix.variant }}${{ needs.resolve.outputs.suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.branch }}-${{ matrix.variant }}${{ needs.resolve.outputs.suffix }}
           build-args: |
             ENTERPRISE_ARCHIVE_URL=${{ inputs.enterprise_url }}
           cache-from: type=gha,scope=${{ matrix.branch }}-${{ matrix.variant }}
