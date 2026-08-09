@@ -173,13 +173,18 @@ if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UP
             flock 9
         fi
 
-        installed_version="0.0.0.0"
-        if [ -f /var/www/html/version.php ]; then
-            # shellcheck disable=SC2016
-            installed_version="$(php -r 'require "/var/www/html/version.php"; echo implode(".", $OC_Version);')"
-        fi
+        # The code is baked into the image: image_version is always current.
         # shellcheck disable=SC2016
-        image_version="$(php -r 'require "/usr/src/nextcloud/version.php"; echo implode(".", $OC_Version);')"
+        image_version="$(php -r 'require "/var/www/html/version.php"; echo implode(".", $OC_Version);')"
+
+        # The installed version is tracked in config/version.php (persistent volume).
+        # This file is written by the entrypoint after each successful install/upgrade.
+        # Absence means a fresh installation.
+        installed_version="0.0.0.0"
+        if [ -f /var/www/html/config/version.php ]; then
+            # shellcheck disable=SC2016
+            installed_version="$(php -r 'require "/var/www/html/config/version.php"; echo implode(".", $OC_Version);')"
+        fi
 
         if version_greater "$installed_version" "$image_version"; then
             echo "Can't start Nextcloud because the version of the data ($installed_version) is higher than the docker image version ($image_version) and downgrading is not supported. Are you sure you have pulled the newest image version?"
@@ -197,20 +202,6 @@ if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UP
                 echo "Upgrading nextcloud from $installed_version ..."
                 get_enabled_apps > /tmp/list_before
             fi
-            if [ "$(id -u)" = 0 ]; then
-                rsync_options="-rlDog --chown $user:$group"
-            else
-                rsync_options="-rlD"
-            fi
-
-            rsync $rsync_options --delete --exclude-from=/upgrade.exclude /usr/src/nextcloud/ /var/www/html/
-            for dir in config data custom_apps themes; do
-                if [ ! -d "/var/www/html/$dir" ] || directory_empty "/var/www/html/$dir"; then
-                    rsync $rsync_options --include "/$dir/" --exclude '/*' /usr/src/nextcloud/ /var/www/html/
-                fi
-            done
-            rsync $rsync_options --include '/version.php' --exclude '/*' /usr/src/nextcloud/ /var/www/html/
-
             # Install
             if [ "$installed_version" = "0.0.0.0" ]; then
                 echo "New nextcloud instance"
@@ -279,6 +270,7 @@ if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UP
 			    set +f # turn glob back on
                         fi
 
+                        cp /var/www/html/version.php /var/www/html/config/version.php
                         run_path post-installation
 		    fi
                 fi
@@ -301,6 +293,7 @@ if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UP
                 fi
                 rm -f /tmp/list_before /tmp/list_after
 
+                cp /var/www/html/version.php /var/www/html/config/version.php
                 run_path post-upgrade
             fi
 
@@ -311,7 +304,7 @@ if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UP
         if [ -n "${NEXTCLOUD_INIT_HTACCESS+x}" ] && [ "$installed_version" != "0.0.0.0" ]; then
             run_as 'php /var/www/html/occ maintenance:update:htaccess'
         fi
-    ) 9> /var/www/html/nextcloud-init-sync.lock
+    ) 9> /var/www/html/config/nextcloud-init-sync.lock
 
     # warn if config files on persistent storage differ from the latest version of this image
     for cfgPath in /usr/src/nextcloud/config/*.php; do

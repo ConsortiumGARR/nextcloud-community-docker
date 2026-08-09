@@ -10,7 +10,6 @@ RUN set -ex; \
         bzip2 \
         libldap-common \
         libmagickcore-7.q16-10-extra \
-        rsync \
     ; \
     apt-get dist-clean; \
     \
@@ -132,7 +131,6 @@ RUN { \
     chown -R www-data:root /var/www; \
     chmod -R g=u /var/www
 
-VOLUME /var/www/html
 
 RUN a2enmod headers rewrite remoteip ; \
     { \
@@ -152,23 +150,40 @@ RUN { \
 
 ENV NEXTCLOUD_VERSION 35.0.2
 
+# When set, the enterprise archive is downloaded from this URL instead of the
+# community tarball.
+ARG ENTERPRISE_ARCHIVE_URL=""
+
 RUN set -ex; \
     fetchDeps=" \
         gnupg \
         dirmngr \
+        unzip \
     "; \
     apt-get update; \
     apt-get install -y --no-install-recommends $fetchDeps; \
     \
-    curl -fsSL -o nextcloud.tar.bz2 "https://github.com/nextcloud-releases/server/releases/download/v35.0.2/nextcloud-35.0.2.tar.bz2"; \
-    curl -fsSL -o nextcloud.tar.bz2.asc "https://github.com/nextcloud-releases/server/releases/download/v35.0.2/nextcloud-35.0.2.tar.bz2.asc"; \
+    if [ -n "$ENTERPRISE_ARCHIVE_URL" ]; then \
+        archive=nextcloud.zip; \
+        archiveUrl="$ENTERPRISE_ARCHIVE_URL"; \
+        ascUrl="$ENTERPRISE_ARCHIVE_URL.asc"; \
+    else \
+        archive=nextcloud.tar.bz2; \
+        archiveUrl="https://github.com/nextcloud-releases/server/releases/download/v35.0.2/nextcloud-35.0.2.tar.bz2"; \
+        ascUrl="https://github.com/nextcloud-releases/server/releases/download/v35.0.2/nextcloud-35.0.2.tar.bz2.asc"; \
+    fi; \
+    curl -fsSL -o "$archive" "$archiveUrl"; \
+    curl -fsSL -o "$archive.asc" "$ascUrl"; \
     export GNUPGHOME="$(mktemp -d)"; \
 # gpg key from https://nextcloud.com/nextcloud.asc
     gpg --batch --keyserver keyserver.ubuntu.com --recv-keys 28806A878AE423A28372792ED75899B9A724937A; \
-    gpg --batch --verify nextcloud.tar.bz2.asc nextcloud.tar.bz2; \
-    tar -xjf nextcloud.tar.bz2 -C /usr/src/; \
+    gpg --batch --verify "$archive.asc" "$archive"; \
+    case "$archive" in \
+        *.zip) unzip -q "$archive" -d /usr/src/ ;; \
+        *) tar -xjf "$archive" -C /usr/src/ ;; \
+    esac; \
     gpgconf --kill all; \
-    rm nextcloud.tar.bz2.asc nextcloud.tar.bz2; \
+    rm "$archive" "$archive.asc"; \
     rm -rf "$GNUPGHOME" /usr/src/nextcloud/updater; \
     mkdir -p /usr/src/nextcloud/data; \
     mkdir -p /usr/src/nextcloud/custom_apps; \
@@ -177,8 +192,23 @@ RUN set -ex; \
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false $fetchDeps; \
     apt-get dist-clean
 
-COPY *.sh upgrade.exclude /
+COPY *.sh /
 COPY config/* /usr/src/nextcloud/config/
+
+# The code is baked into the image, so there is no rsync at startup. Only the
+# default config files are kept in /usr/src/nextcloud, as the reference the
+# entrypoint compares the persistent config volume against.
+RUN set -ex; \
+    cp -a /usr/src/nextcloud/. /var/www/html/; \
+    find /usr/src/nextcloud -mindepth 1 -maxdepth 1 ! -name config -exec rm -rf '{}' +; \
+    mkdir -p /var/www/html/themes; \
+    chown -R www-data:root /var/www/html; \
+    chmod -R g=u /var/www/html
+
+VOLUME /var/www/html/config
+VOLUME /var/www/html/data
+VOLUME /var/www/html/custom_apps
+VOLUME /var/www/html/themes
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["apache2-foreground"]

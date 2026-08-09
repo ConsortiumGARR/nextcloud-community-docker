@@ -126,21 +126,38 @@ RUN { \
 
 ENV NEXTCLOUD_VERSION 34.0.5
 
+# When set, the enterprise archive is downloaded from this URL instead of the
+# community tarball.
+ARG ENTERPRISE_ARCHIVE_URL=""
+
 RUN set -ex; \
     apk add --no-cache --virtual .fetch-deps \
         bzip2 \
         gnupg \
+        unzip \
     ; \
     \
-    curl -fsSL -o nextcloud.tar.bz2 "https://github.com/nextcloud-releases/server/releases/download/v34.0.5/nextcloud-34.0.5.tar.bz2"; \
-    curl -fsSL -o nextcloud.tar.bz2.asc "https://github.com/nextcloud-releases/server/releases/download/v34.0.5/nextcloud-34.0.5.tar.bz2.asc"; \
+    if [ -n "$ENTERPRISE_ARCHIVE_URL" ]; then \
+        archive=nextcloud.zip; \
+        archiveUrl="$ENTERPRISE_ARCHIVE_URL"; \
+        ascUrl="$ENTERPRISE_ARCHIVE_URL.asc"; \
+    else \
+        archive=nextcloud.tar.bz2; \
+        archiveUrl="https://github.com/nextcloud-releases/server/releases/download/v34.0.5/nextcloud-34.0.5.tar.bz2"; \
+        ascUrl="https://github.com/nextcloud-releases/server/releases/download/v34.0.5/nextcloud-34.0.5.tar.bz2.asc"; \
+    fi; \
+    curl -fsSL -o "$archive" "$archiveUrl"; \
+    curl -fsSL -o "$archive.asc" "$ascUrl"; \
     export GNUPGHOME="$(mktemp -d)"; \
 # gpg key from https://nextcloud.com/nextcloud.asc
     gpg --batch --keyserver keyserver.ubuntu.com  --recv-keys 28806A878AE423A28372792ED75899B9A724937A; \
-    gpg --batch --verify nextcloud.tar.bz2.asc nextcloud.tar.bz2; \
-    tar -xjf nextcloud.tar.bz2 -C /usr/src/; \
+    gpg --batch --verify "$archive.asc" "$archive"; \
+    case "$archive" in \
+        *.zip) unzip -q "$archive" -d /usr/src/ ;; \
+        *) tar -xjf "$archive" -C /usr/src/ ;; \
+    esac; \
     gpgconf --kill all; \
-    rm nextcloud.tar.bz2.asc nextcloud.tar.bz2; \
+    rm "$archive" "$archive.asc"; \
     rm -rf "$GNUPGHOME" /usr/src/nextcloud/updater; \
     mkdir -p /usr/src/nextcloud/data; \
     mkdir -p /usr/src/nextcloud/custom_apps; \
