@@ -301,7 +301,7 @@ if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UP
         fi
 
         # Update htaccess after init if requested
-        if [ -n "${NEXTCLOUD_INIT_HTACCESS+x}" ] && [ "$installed_version" != "0.0.0.0" ]; then
+        if [ "${NEXTCLOUD_INIT_HTACCESS:-false}" = "true" ] && [ "$installed_version" != "0.0.0.0" ]; then
             run_as 'php /var/www/html/occ maintenance:update:htaccess'
         fi
     ) 9> /var/www/html/config/nextcloud-init-sync.lock
