@@ -125,21 +125,38 @@ RUN { \
 
 ENV NEXTCLOUD_VERSION %%VERSION%%
 
+# When set, the enterprise archive is downloaded from this URL instead of the
+# community tarball.
+ARG ENTERPRISE_ARCHIVE_URL=""
+
 RUN set -ex; \
     apk add --no-cache --virtual .fetch-deps \
         bzip2 \
         gnupg \
+        unzip \
     ; \
     \
-    curl -fsSL -o nextcloud.tar.bz2 "%%DOWNLOAD_URL%%"; \
-    curl -fsSL -o nextcloud.tar.bz2.asc "%%DOWNLOAD_URL_ASC%%"; \
+    if [ -n "$ENTERPRISE_ARCHIVE_URL" ]; then \
+        archive=nextcloud.zip; \
+        archiveUrl="$ENTERPRISE_ARCHIVE_URL"; \
+        ascUrl="$ENTERPRISE_ARCHIVE_URL.asc"; \
+    else \
+        archive=nextcloud.tar.bz2; \
+        archiveUrl="%%DOWNLOAD_URL%%"; \
+        ascUrl="%%DOWNLOAD_URL_ASC%%"; \
+    fi; \
+    curl -fsSL -o "$archive" "$archiveUrl"; \
+    curl -fsSL -o "$archive.asc" "$ascUrl"; \
     export GNUPGHOME="$(mktemp -d)"; \
 # gpg key from https://nextcloud.com/nextcloud.asc
     gpg --batch --keyserver keyserver.ubuntu.com  --recv-keys 28806A878AE423A28372792ED75899B9A724937A; \
-    gpg --batch --verify nextcloud.tar.bz2.asc nextcloud.tar.bz2; \
-    tar -xjf nextcloud.tar.bz2 -C /usr/src/; \
+    gpg --batch --verify "$archive.asc" "$archive"; \
+    case "$archive" in \
+        *.zip) unzip -q "$archive" -d /usr/src/ ;; \
+        *) tar -xjf "$archive" -C /usr/src/ ;; \
+    esac; \
     gpgconf --kill all; \
-    rm nextcloud.tar.bz2.asc nextcloud.tar.bz2; \
+    rm "$archive" "$archive.asc"; \
     rm -rf "$GNUPGHOME" /usr/src/nextcloud/updater; \
     mkdir -p /usr/src/nextcloud/data; \
     mkdir -p /usr/src/nextcloud/custom_apps; \
