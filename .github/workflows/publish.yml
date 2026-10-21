@@ -44,7 +44,8 @@ jobs:
               echo "Branch $branch is not in versions.json" >&2
               exit 1
             fi
-            if [ "$repoVersion" != "$version" ]; then
+            # Enterprise archives may carry a fourth, build component (35.0.2.4).
+            if [ "$repoVersion" != "$version" ] && [ "${version#"$repoVersion".}" = "$version" ]; then
               echo "versions.json has branch $branch at $repoVersion, not $version" >&2
               exit 1
             fi
