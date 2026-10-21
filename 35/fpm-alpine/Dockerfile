@@ -161,21 +161,21 @@ RUN set -ex; \
     rm -rf "$GNUPGHOME" /usr/src/nextcloud/updater; \
     mkdir -p /usr/src/nextcloud/data; \
     mkdir -p /usr/src/nextcloud/custom_apps; \
+    mkdir -p /usr/src/nextcloud/themes; \
     chmod +x /usr/src/nextcloud/occ; \
+# The code is baked into the image, so there is no rsync at startup. This happens in
+# the same layer as the extraction, otherwise the image would carry the code twice.
+# Only the default config files are kept in /usr/src/nextcloud, as the reference the
+# entrypoint compares the persistent config volume against.
+    cp -a /usr/src/nextcloud/. /var/www/html/; \
+    find /usr/src/nextcloud -mindepth 1 -maxdepth 1 ! -name config -exec rm -rf '{}' +; \
+    chown -R www-data:root /var/www/html; \
+    chmod -R g=u /var/www/html; \
     apk del --no-network .fetch-deps
 
 COPY *.sh /
 COPY config/* /usr/src/nextcloud/config/
-
-# The code is baked into the image, so there is no rsync at startup. Only the
-# default config files are kept in /usr/src/nextcloud, as the reference the
-# entrypoint compares the persistent config volume against.
-RUN set -ex; \
-    cp -a /usr/src/nextcloud/. /var/www/html/; \
-    find /usr/src/nextcloud -mindepth 1 -maxdepth 1 ! -name config -exec rm -rf '{}' +; \
-    mkdir -p /var/www/html/themes; \
-    chown -R www-data:root /var/www/html; \
-    chmod -R g=u /var/www/html
+COPY --chown=www-data:root config/* /var/www/html/config/
 
 VOLUME /var/www/html/config
 VOLUME /var/www/html/data

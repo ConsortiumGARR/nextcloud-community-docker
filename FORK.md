@@ -107,12 +107,13 @@ release while fpm runs another. The publish workflow always builds them together
   generated Dockerfiles
 - `docker-entrypoint.sh`: install/upgrade logic, structurally identical to the
   official community entrypoint
-- `update.sh`: generates `32/`, `33/` and `34/` from the templates and `versions.json`
+- `update.sh`: generates one directory per version in `versions.json` (e.g. `35/`)
+  from the templates
 - `.config/`: default PHP config files, baked into the image and also kept in
   `/usr/src/nextcloud/config/` as a reference for drift detection warnings at startup
 - `nginx/Dockerfile`: sidecar image, the app image's code copied onto `nginx:alpine`
 
-Everything under `32/`, `33/` and `34/` is generated. Do not edit it by hand.
+Everything under the version directories is generated. Do not edit it by hand.
 
 ## Not included
 
